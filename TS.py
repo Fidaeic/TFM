@@ -136,17 +136,22 @@ def forecast(df, model, estac=96, horizonte=96):
     plt.legend(["Consumo real", "Consumo predicho"], fontsize=14)
     return y_pred_train, y_pred_test, df_for, y_for_test, y_forecast, elapsed_time
 
-def NN_model(nodes, est=96, lay=3, init = 'normal', act='relu', opt='adam'):
-    #Creación del modelo
-    model = Sequential()
-    for _ in range(lay):
-        model.add(Dense(nodes, input_dim=est, kernel_initializer=init, activation=act))
-    model.add(Dense(1, kernel_initializer=init))
-    # Compile model
-    model.compile(optimizer=opt, loss='mse')
-    return model
 
-def forecast_NN(df, model, estac=96, horizonte=96):
+
+def forecast_NN(df, nodes, estac=96, horizonte=96, est=96, lay=3, init='normal', act='relu', opt='adam'):
+    
+    global lay
+    
+    def NN_model():
+        #Creación del modelo
+        model = Sequential()
+        for _ in range(lay):
+            model.add(Dense(nodes, input_dim=est, kernel_initializer=init, activation=act))
+        model.add(Dense(1, kernel_initializer=init))
+        # Compile model
+        model.compile(optimizer=opt, loss='mse')
+        return model
+
     start_time = time.time()
     dataframe = pd.DataFrame()
     for i in range(estac, 0, -1):
@@ -158,8 +163,10 @@ def forecast_NN(df, model, estac=96, horizonte=96):
     y = aux.iloc[:-horizonte, -1]
     y_for_test = aux.iloc[-horizonte:, -1]
     X_train, X_test, y_train, y_test = train_test_split(X, y, shuffle=False)
-    estimator = KerasRegressor(build_fn=model, epochs=100, batch_size=32, verbose=0)
-    estimator.fit(X_train, y_train, epochs=100, batch_size=64)
+
+    estimator = KerasRegressor(build_fn=NN_model, nb_epoch=100, batch_size=32, verbose=False)
+    
+    estimator.fit(X_train, y_train)
     y_pred_train = estimator.predict(X_train)
     y_pred_test = estimator.predict(X_test)
 
@@ -175,6 +182,7 @@ def forecast_NN(df, model, estac=96, horizonte=96):
     for i in range(1, horizonte):
         df_for = df_for.append(df_for.iloc[i-1, :].shift(-1))
         df_for.iloc[i, estac] = estimator.predict(np.array(df_for.iloc[i, :-1]).reshape(1, estac))
+
     y_forecast = df_for[estac].values
 
     print('Precisión predicción: ', r2_score(y_for_test, y_forecast)*100, "%")
@@ -185,10 +193,10 @@ def forecast_NN(df, model, estac=96, horizonte=96):
     xlabels = y_for_test.index
     plt.plot(y_for_test.values, color='black')
     plt.plot(y_forecast, color='blue')
-    plt.xticks(labels=xlabels, rotation=40, ha='right')
+    #plt.xticks(labels=xlabels, rotation=40, ha='right')
     plt.ylabel("Consumo de agua medido en m3", fontsize=16)
     plt.legend(["Consumo real", "Consumo predicho"], fontsize=14)
-    return(y_pred_train, y_pred_test, df_for, y_for_test, y_forecast, elapsed_time)
+    return(y_pred_train, y_pred_test, df_for, y_for_test, y_forecast, elapsed_time, estimator)
 
 # =============================================================================
 # EJECUCIÓN DEL CÓDIGO
@@ -198,5 +206,4 @@ df_flow, almac, nul, bloques = data_wrangler(df_flow)
 df_mediana = reconstruccion(df_flow)
 #df_media = reconstruccion(df_flow, "media")
 #y_pred_train, y_pred_test, df_for, y_for_test, y_forecast, elapsed_time = forecast(df_mediana, SVR())
-nn_mod = NN_model(50, lay=2)
-y_pred_train, y_pred_test, df_for, y_for_test, y_forecast, elapsed_time = forecast_NN(df_mediana, nn_mod)
+y_pred_train, y_pred_test, df_for, y_for_test, y_forecast, elapsed_time, est = forecast_NN(df_mediana, 100, lay=15)
