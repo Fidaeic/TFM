@@ -8,7 +8,7 @@ Created on Mon Jul 20 18:32:20 2020
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+
 from scipy.linalg import svd, eig
 from MSPC_Caudales import PCA
 from statsmodels.multivariate.pca import PCA
@@ -92,26 +92,7 @@ festivos = ["2018-01-01","2018-01-06","2018-03-19","2018-03-30","2018-04-02","20
            "2019-12-08","2019-12-25","2020-01-01","2020-01-06"]
 
 
-def matrizado(fest, df_flow):
-    
-    days = len(df_flow.groupby(df_flow.index.floor('d')).size())
-    
-    datos = np.zeros((days,102))
-    
-    for d, t in zip(range(days), range(0, df_flow.size, 96)):
-        datos[d,:96] = df_flow.iloc[t:t+96].values.reshape(96)
-        datos[d,97] = int(df_flow.index[t].dayofweek+1)
-        datos[d,98] = int(df_flow.index[t].day)
-        datos[d,99] = int(df_flow.index[t].month)
-        datos[d,100] = int(df_flow.index[t].year)
-        
-        for f in fest:
-            if df_flow.index[t]==pd.to_datetime(f):
-                datos[d,101] = 7
-    
-    datos = datos[~np.isnan(datos).any(axis=1)]
-    
-    return datos
+
 
 data = matrizado(festivos, df_flow)
 d = data[:-1,:-6]
