@@ -12,6 +12,7 @@ import numpy as np
 import wrangler
 import matplotlib.pyplot as plt
 from ypstruct import structure
+import wrangler
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
@@ -50,8 +51,11 @@ def mutate(x, mu, sigma):
 def apply_bound(x, varmin, varmax):
     x.position = np.maximum(x.position, varmin)
     x.position = np.minimum(x.position, varmax)
-    
-def run(problem, params, X, y, model):
+
+def prec(y_hat, y_real):
+    return r2_score(y_hat, y_real)
+
+def run(problem, params, df_recon, estac, horizon, model):
 
     # Problem Information
     costfunc = problem.costfunc
@@ -77,20 +81,21 @@ def run(problem, params, X, y, model):
     # Best Solution Ever Found
     bestsol = empty_individual.deepcopy()
     bestsol.cost = 0
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y)
+
+    X_train, X_test, y_train, y_test, X, y, y_for_test= wrangler.shifting(df_recon, estac, horizon)
+
     # Initialize Population
     pop = empty_individual.repeat(npop)
     
     if model=='RF':
         for i in range(npop):
             pop[i].position = np.random.randint(varmin, varmax, nvar)
-    
+
             rf = RandomForestRegressor(n_estimators=pop[i].position[0],
                                       max_depth=pop[i].position[1],
                                       min_samples_split=pop[i].position[2],
                                       min_samples_leaf=pop[i].position[3])
-            
+
             rf.fit(X_train, y_train)
             y_hat = rf.predict(X_test)
             
@@ -183,33 +188,4 @@ def run(problem, params, X, y, model):
     out.bestcost = bestcost
     return out
 
-def prec(y_hat, y_real):
-    return r2_score(y_hat, y_real)
 
-# =============================================================================
-# EXECUTION OF CODE
-# =============================================================================
-
-# Problem Definition
-problem = structure()
-problem.costfunc = prec
-problem.nvar = 4
-#n_estimators, max_depth, min samples split, min samples leaf
-problem.varmin = [1, 1, 2, 1]
-problem.varmax = [500,  100, 20, 20]
-
-# GA Parameters
-params = structure()
-params.maxit = 50
-params.npop = 50
-params.beta = 1
-params.pc = 1
-params.gamma = 0.1
-params.mu = 0.01
-params.sigma = 0.1
-
-data = fetch_california_housing()
-X, y = data['data'][:200], data['target'][:200]
-
-# Run GA
-out = run(problem, params, X, y, model='RF')

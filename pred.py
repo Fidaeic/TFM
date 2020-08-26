@@ -25,6 +25,11 @@ from keras.models import Sequential
 from keras.layers import Dense
 from keras.wrappers.scikit_learn import KerasRegressor
 
+def conf_int_known(forecast, alpha, f_error):
+    const = norm.ppf(1-alpha/2)
+    cint = [forecast-const*f_error, forecast+const*f_error]
+    return c_int
+
 
 # =============================================================================
 # FORECASTING METHODS FOR WATER CONSUMPTION TIME SERIES
@@ -86,7 +91,7 @@ def forecast(df, model, estac=96, horizon=96, prt=1):
     # Training confidence intervals
     res_train = y_pred_train-y_train
     mu_train = np.mean(res_train)
-    sigma_train = np.std(res_train)    
+    sigma_train = np.std(res_train)
     
     elapsed_time = time.time()-start_time
     print("Tiempo transcurrido: ", elapsed_time, " segundos")

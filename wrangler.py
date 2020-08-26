@@ -50,17 +50,18 @@ def matrizado(fest, df_flow):
     data = np.zeros((days,102))
     
     for d, t in zip(range(days), range(0, df_flow.size, 96)):
-        datos[d,:96] = df_flow.iloc[t:t+96].values.reshape(96)
-        datos[d,97] = int(df_flow.index[t].dayofweek+1)
-        datos[d,98] = int(df_flow.index[t].day)
-        datos[d,99] = int(df_flow.index[t].month)
-        datos[d,100] = int(df_flow.index[t].year)
+        data[d,:96] = df_flow.iloc[t:t+96].values.reshape(96)
+        data[d,97] = int(df_flow.index[t].dayofweek+1)
+        data[d,98] = int(df_flow.index[t].day)
+        data[d,99] = int(df_flow.index[t].month)
+        data[d,100] = int(df_flow.index[t].year)
         
-        for f in fest:
-            if df_flow.index[t]==pd.to_datetime(f):
-                datos[d,101] = 7
+        if fest:
+            for f in fest:
+                if df_flow.index[t]==pd.to_datetime(f):
+                    data[d,101] = 7
     
-    data = data[~np.isnan(datos).any(axis=1)]
+    data = data[~np.isnan(data).any(axis=1)]
     
     return data
 
