@@ -9,16 +9,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import pred
+from scipy.stats import norm
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.metrics import r2_score
 
-# import keras
-# from keras.models import Sequential
-# from keras.layers import Dense
-# from keras.wrappers.scikit_learn import KerasRegressor
+import keras
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.wrappers.scikit_learn import KerasRegressor
 
 class waTS(object):
     
@@ -27,6 +28,8 @@ class waTS(object):
         self.ts = ts
         self.ts_recon = None
         self.ts_matrix = None
+        self.median_matrix = None
+        self.df_matrix = None
     
         self._time = 0
         self._nul = None
@@ -144,7 +147,7 @@ class waTS(object):
 # =============================================================================
 # CLUSTERING
 # =============================================================================
-    def Qn(x):
+    def Qn(self, x):
         '''
         Parameters
         ----------
@@ -171,7 +174,7 @@ class waTS(object):
         qn = 2.2219*ser[k]
         return qn
 
-    def clusters(mat, n_clusters):
+    def clusters(self):
         '''
         Parameters
         ----------
@@ -186,34 +189,33 @@ class waTS(object):
             Matriz con las medianas de cada clúster.
     
         '''
-
-        lab_win = mat[np.where(np.logical_and(np.logical_and(mat[:,97]>=1, mat[:,97]<=5), np.logical_and(mat[:,99]>=12, mat[:,99]<3)))]
-        fest_win = mat[np.where(np.logical_and(np.logical_or(mat[:,97]==6, mat[:,97]==7), np.logical_and(mat[:,99]>=12, mat[:,99]<3)))]
-
-        lab_spr = mat[np.where(np.logical_and(np.logical_and(mat[:,97]>=1, mat[:,97]<=5), np.logical_and(mat[:,99]>=3, mat[:,99]<6)))]
-        fest_spr = mat[np.where(np.logical_and(np.logical_or(mat[:,97]==6, mat[:,97]==7), np.logical_and(mat[:,99]>=3, mat[:,99]<6)))]
-
-        lab_sum = mat[np.where(np.logical_and(np.logical_and(mat[:,97]>=1, mat[:,97]<=5), np.logical_and(mat[:,99]>=6, mat[:,99]<9)))]
-        fest_sum = mat[np.where(np.logical_and(np.logical_or(mat[:,97]==6, mat[:,97]==7), np.logical_and(mat[:,99]>=6, mat[:,99]<9)))]
-
-        lab_fal = mat[np.where(np.logical_and(np.logical_and(mat[:,97]>=1, mat[:,97]<=5), np.logical_and(mat[:,99]>=9, mat[:,99]<12)))]
-        fest_fal = mat[np.where(np.logical_and(np.logical_or(mat[:,97]==6, mat[:,97]==7), np.logical_and(mat[:,99]>=9, mat[:,99]<12)))]
-        #Hay que ponerle una etiqueta a los datos para que sean más interpretables y podamos aplicarles las líneas de abajo
+        start_time = time.time()
+        mat = self.ts_matrix
         
-        
-        clus = KMeans(n_clusters=n_clusters).fit(mat)
         df = pd.DataFrame(mat)
-        df['labels'] = clus.labels_
-        mat = np.array(df)
+        df['day'] = np.where(np.logical_and(df[97]>=1, df[97]<=5), 0, 1)
+
+        df['labels'] = np.where(df['day']==0,
+                                      np.where(
+                                          np.logical_or(df[99]==12, df[99]<3), 0, np.where(
+                                              np.logical_and(df[99]>=3, df[99]<6), 2, np.where(
+                                                  np.logical_and(df[99]>=6, df[99]<9), 4, 6))), 
+                                      np.where(
+                                          np.logical_or(df[99]==12, df[99]<3), 1, np.where(
+                                              np.logical_and(df[99]>=3, df[99]<6), 3, np.where(
+                                                  np.logical_and(df[99]>=6, df[99]<9), 5, 7))))
     
-        median = np.zeros((len(np.unique(clus.labels_)), 96))
-        for i in np.unique(clus.labels_):
-            a = mat[mat[:,-1]==i]
+        median = np.zeros((len(np.unique(df.labels)), 96))
+        for i in np.unique(df.labels):
+            a = df[df['labels']==i]
             for j in range(96):
-                median[i, j] = np.median(a[:, j])
-        return mat, median, clus.inertia_
+                median[i, j] = np.median(a.iloc[:, j])
+        elapsed_time = time.time()-start_time
+        self.median_matrix = median
+        self.df_matrix = df
+        self._time+=elapsed_time
     
-    def outlier_region(df, n_clusters):
+    def outlier_region(self):
         '''
         Parameters
         ----------
@@ -227,14 +229,17 @@ class waTS(object):
         pr : TYPE
             DESCRIPTION.
         '''
-        mat = self.matrix(0, df)
-        cl, med, inertia = self.clusters(mat, n_clusters)
+        start_time = time.time()
+        med = self.median_matrix
+        cl = self.df_matrix
+        df = self.ts_recon
+
         qn = []
     
         for i in range(med.shape[0]):
-            a = cl[cl[:,-1]==i][:,:96]
+            a = np.array(cl[cl['labels']==i].drop(cl.columns[-8:], axis=1))
             b = np.reshape(a,a.size)
-            qn.append(Qn(b))
+            qn.append(self.Qn(b))
     
         upper_90 = []
         lower_90 = []
@@ -245,9 +250,9 @@ class waTS(object):
         upper_99 = []
         lower_99 = []
     
-        for row in cl:
+        for row in cl.iterrows():
             a = row[:96]
-            cluster = int(row[102])
+            cluster = int(row[1]['labels'])
             m = med[cluster, :]
             upper_90.append([x + norm.ppf(1-0.1/2)*qn[cluster] for x in m])
             lower_90.append([x - norm.ppf(1-0.1/2)*qn[cluster] for x in m])
@@ -277,8 +282,8 @@ class waTS(object):
         lower_99 = lower_99.reshape(lower_99.size)
     
         medianas = []
-        for row in cl:
-            medianas.append(med[int(row[102])])
+        for row in cl.iterrows():
+            medianas.append(med[int(row[1]['labels'])])
             
         medianas = np.array(medianas)
         medianas = medianas.reshape(medianas.size)
@@ -296,6 +301,7 @@ class waTS(object):
         dataframe["Lower_99"] = lower_99
     
         dataframe["Median"] = medianas
+        elapsed_time = time.time()-start_time
         return dataframe
     
     def graficado(dia, mes, ano, df, alpha):
