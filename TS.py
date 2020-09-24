@@ -36,10 +36,10 @@ dataf, time = recon.recon_hybrid(df_flow, bloques, 96, short='KNN', weeks=4)
 dataf = dataf.iloc[:-4]
 
 #Determinación de valores anómalos y gráficos
-df = outies.outlier_region(dataf, n_clusters=20)
+df = outies.outlier_region(dataf, n_clusters=7)
 
 for i in range(1, 31):
-    outies.graficado(i, 10, 2018, df, 0)
+    outies.graficado(i, 6, 2018, df, 0)
 
 #Sustitución de los valores anómalos por la mediana del cluster
 
@@ -111,4 +111,41 @@ y_pred_train_KNN_2, y_pred_test_KNN_2, y_for_test_KNN_2, y_forecast_KNN_2, elaps
 # PIPELINE
 # =============================================================================
 
+iner = []
+for i in range(5,50):
+    cl, med, inertia = outies.clusters(mat, i)
+    
+    iner.append(inertia)
+plt.plot(iner)
+
+from sklearn.decomposition import PCA
+pr = mat[:, :96]
+
+pca = PCA()
+
+pca.fit(pr)
+plt.plot(pca.explained_variance_ratio_)
+
+plt.scatter(pca.components_[1], pca.components_[2])
+
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+df_corr_2018 = df_corr.loc['2018']
+df_corr_2019 = df_corr.loc['2019']
+
+plt.plot(df_corr_2018)
+plt.plot(df_corr_2019)
+
+result = seasonal_decompose(df_corr_2018.Flow, model='additive', period=672)
+result.plot()
+
+result = seasonal_decompose(df_corr_2019.Flow, model='additive', period=672)
+result.plot()
+
+print(result.trend)
+print(result.seasonal)
+print(result.resid)
+print(result.observed)
+
+plt.plot(df_corr_2018.loc['2018-06'])
 

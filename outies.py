@@ -39,7 +39,7 @@ def clusters(mat, n_clusters):
         a = mat[mat[:,-1]==i]
         for j in range(96):
             median[i, j] = np.median(a[:, j])
-    return mat, median
+    return mat, median, clus.inertia_
 
 def Qn(x):
     '''
@@ -60,20 +60,16 @@ def Qn(x):
 
     ser = []
 
-    for i in x:
-        for j in x[1:]:
-            if i != j:
-                ser.append(abs(i-j))
+    for i in range(len(x)):
+        for j in range(1, len(x)):
+            if j>i:
+                ser.append(abs(x[i]-x[j]))
     ser = sorted(ser)
     qn = 2.2219*ser[k]
     return qn
 
 def outlier_region(df, n_clusters):
     '''
-    Intendo de calcular la outlier region. Por ahora el problema que plantea es que la cantidad de datos calculados
-    no se corresponde con la cantidad de instantes existentes en la serie temporal original. Queda determinar cómo calcular
-    la diferencia entre cada instante y la mediana correspondiente al día para poner las regiones
-
     Parameters
     ----------
     df : TYPE
@@ -85,12 +81,11 @@ def outlier_region(df, n_clusters):
     -------
     pr : TYPE
         DESCRIPTION.
-
     '''
     mat = wrangler.matrizado(0, df)
-    cl, med = clusters(mat, n_clusters)
+    cl, med, inertia = clusters(mat, n_clusters)
     qn = []
-    
+
     for i in range(med.shape[0]):
         a = cl[cl[:,-1]==i][:,:96]
         b = np.reshape(a,a.size)
@@ -169,8 +164,7 @@ def graficado(dia, mes, ano, df, alpha):
     plt.title(f"Consumption and outlier region on day {ano}-{mes}-{dia}", fontsize=20)
     plt.ylabel("Water consumption (m3/h)", fontsize=16)
     plt.xticks(rotation=45)
-    
-    
+
     if alpha == 0.1:
         plt.plot(df.loc[fecha, "Upper_90"], color='red', linestyle='dashed')
         plt.plot(df.loc[fecha, "Lower_90"], color='red', linestyle='dashed')

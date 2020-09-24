@@ -6,5 +6,5 @@ save_non_project_files = False
 
 [main]
 version = 0.2.0
-recent_files = ['TS.py', 'recon.py', 'pred.py', 'wrangler.py', 'Temp.py', 'ga.py', 'outies.py']
+recent_files = ['TS.py', 'ga.py', 'outies.py', 'Temp.py', 'waTS.py', 'wrangler.py']
 
