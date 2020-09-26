@@ -15,6 +15,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.metrics import r2_score
+from sklearn.svm import SVR
+from sklearn.gaussian_process import GaussianProcessRegressor
 
 import keras
 from keras.models import Sequential
@@ -30,6 +32,9 @@ class waTS(object):
         self.ts_matrix = None
         self.median_matrix = None
         self.df_matrix = None
+        self.df_outliers = None
+        self.df_correct = None
+        self.ts_final = None
     
         self._time = 0
         self._nul = None
@@ -75,8 +80,17 @@ class waTS(object):
         for i in range(0, len(stored)-1):
             chunks.append(ts.loc[stored[i][1]:stored[i+1][0]].index)
         chunks.append(ts.loc[stored[-1][1]:null[-1]].index)
+
+        date_first = str(ts.head(1).index.year[0])+"-"+str(ts.head(1).index.month[0])+"-"+str(ts.head(1).index.day[0])
+        date_last = str(ts.tail(1).index.year[0])+"-"+str(ts.tail(1).index.month[0])+"-"+str(ts.tail(1).index.day[0])
+
+        if len(ts.loc[date_first])<96:
+            ts.drop(ts.drop.loc[date_first].index, inplace=True)
+
+        if len(ts.loc[date_last])<96:
+            ts.drop(ts.loc[date_last].index, inplace=True)
     
-        #Dibujamos en un gráfico las posiciones en las que hay datos vacíos
+        #Dibujamos en un gráfico lfirstas posiciones en las que hay datos vacíos
         if plot==True:    
             plt.figure(figsize=(30, 10))
             plt.xlabel("Time", fontsize=18)
@@ -301,10 +315,47 @@ class waTS(object):
         dataframe["Lower_99"] = lower_99
     
         dataframe["Median"] = medianas
+
         elapsed_time = time.time()-start_time
-        return dataframe
+        self.df_outliers = dataframe
+        self._time += elapsed_time
+        
+    def corrected(self, alpha):
+        
+        df_outliers = self.df_outliers
+        start_time = time.time()
+        correct = np.zeros(df_outliers.shape[0])
+        i = 0
+        if alpha == 0.1:
+            for index, row in df_outliers.iterrows():
+                if row["Flow"]>row["Upper_90"] or row["Flow"]<row["Lower_90"]:
+                    correct[i] = row["Median"]
+                else:
+                    correct[i] = row["Flow"]
+                i+=1
+        elif alpha == 0.05:
+            for index, row in df_outliers.iterrows():
+                if row["Flow"]>row["Upper_95"] or row["Flow"]<row["Lower_95"]:
+                    correct[i] = row["Median"]
+                else:
+                    correct[i] = row["Flow"]
+                i+=1
+        elif alpha == 0.01:
+            for index, row in df_outliers.iterrows():
+                if row["Flow"]>row["Upper_99"] or row["Flow"]<row["Lower_99"]:
+                    correct[i] = row["Median"]
+                else:
+                    correct[i] = row["Flow"]
+                i+=1
+        df_correct = pd.DataFrame({"Flow": correct}, index=df_outliers.index)
+        elapsed_time = time.time()-start_time
+        
+        self.df_correct = df_correct
+        self._time += elapsed_time
     
-    def graficado(dia, mes, ano, df, alpha):
+    def day_plot(self, dia, mes, ano, alpha):
+    
+        df = self.df_outliers
     
         fecha = str(ano)+"-"+str(mes)+"-"+str(dia)
         plt.figure(figsize=(16,10))
@@ -670,3 +721,32 @@ class waTS(object):
         
         self.ts_recon = dataframe
         self._time += elapsed_time
+    
+class Pipeline(waTS):
+    def wrangle(self):
+        self.data_wrangler(plot=1)
+
+    def recon(self, method, weeks, short='median', long='ARIMA', steps=96, seasonal1=96, seasonal2=672):
+        if method=='mean':
+            self.recon_mean(weeks)
+        elif method=='median':
+            self.recon_median(weeks)
+        else:
+            self.recon_hybrid(steps, seasonal1, seasonal2, short, long, weeks)
+    
+    def outliers(self, fest, alpha, correction=True):
+        self.matrix(fest, self.ts_recon)
+        self.clusters()
+        self.outlier_region()
+        if correction==True:
+            self.corrected(alpha)
+            self.ts_final = self.df_correct
+        else:
+            self.ts_final = self.ts_recon
+    def predict(self, model=KNeighborsRegressor(), stat=96, horizon=96, prt=1, 
+                 nodes=20, epochs=50, lay=3, init='normal', act='relu', opt='adam', nn=False):
+        if nn==False:
+            self.forecast(self.ts_final, model, stat, horizon, prt)
+        else:
+            self.forecast_NN(self.ts_final, nodes, epochs, stat, horizon, lay, init, act, opt, prt)
+        
