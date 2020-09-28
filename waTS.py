@@ -18,6 +18,10 @@ from sklearn.metrics import r2_score
 from sklearn.svm import SVR
 from sklearn.gaussian_process import GaussianProcessRegressor
 
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from tbats import TBATS
+from pmdarima.arima import auto_arima, ADFTest
+
 import keras
 from keras.models import Sequential
 from keras.layers import Dense
@@ -689,11 +693,6 @@ class waTS(object):
                 if short == 'ARIMA':
                     arima_model = auto_arima(ts)
                     y_forecast = arima_model.predict(n_periods=len(c))
-                    
-                elif short == 'TBATS':
-                    estimator = TBATS(seasonal_periods=[seasonal1, seasonal2])
-                    fitted_model = estimator.fit(ts)
-                    y_forecast = fitted_model.forecast(steps=len(c))
                 
                 elif short == 'HW':
                     estimator = ExponentialSmoothing(ts, trend='add', seasonal='add', seasonal_periods=seasonal1)
@@ -708,9 +707,6 @@ class waTS(object):
                     y_forecast = self._y_forecast
                 elif short == 'SVR':
                     self.forecast(ts, SVR(), horizon=len(c), stat=seasonal1, prt=0)
-                    y_forecast = self._y_forecast
-                elif short == 'GPR':
-                    self.forecast(ts, GaussianProcessRegressor(), horizon=len(c), stat=seasonal1, prt=0)
                     y_forecast = self._y_forecast
     
                 j=0
@@ -749,4 +745,3 @@ class Pipeline(waTS):
             self.forecast(self.ts_final, model, stat, horizon, prt)
         else:
             self.forecast_NN(self.ts_final, nodes, epochs, stat, horizon, lay, init, act, opt, prt)
-        
