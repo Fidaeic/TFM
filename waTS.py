@@ -52,6 +52,9 @@ class waTS(object):
         self._y = None
         self._y_for_test = None
         self._accuracy = None
+        self._alpha = None
+        self._length = None
+        self._days  = None
 
 # =============================================================================
 # DATA WRANGLING METHODS
@@ -93,7 +96,11 @@ class waTS(object):
 
         if len(ts.loc[date_last])<96:
             ts.drop(ts.loc[date_last].index, inplace=True)
-    
+
+        steps = ts.groupby(ts.index.floor('d')).size()
+        length = steps[0]
+        days = len(steps)
+        
         #Dibujamos en un gráfico lfirstas posiciones en las que hay datos vacíos
         if plot==True:    
             plt.figure(figsize=(30, 10))
@@ -108,6 +115,8 @@ class waTS(object):
         self._nul = null
         self._sto = stored
         self._chunks = chunks
+        self._length = length
+        self._days = days
         self._time += elapsed_time
         
     def shifting(self, df, stat, horizon, t_size=0.3):
@@ -138,30 +147,31 @@ class waTS(object):
         self._time += elapsed_time
 
     def matrix(self, fest, ts):
-        
+
         start_time = time.time()
-        days = len(ts.groupby(ts.index.floor('d')).size())
         
-        data = np.zeros((days,102))
+        length = self._length
+        days = self._days
         
-        for d, t in zip(range(days), range(0, ts.size, 96)):
-            data[d,:96] = ts.iloc[t:t+96].values.reshape(96)
-            data[d,97] = int(ts.index[t].dayofweek+1)
-            data[d,98] = int(ts.index[t].day)
-            data[d,99] = int(ts.index[t].month)
-            data[d,100] = int(ts.index[t].year)
+        data = np.zeros((days,length+6))
+        
+        for d, t in zip(range(days), range(0, ts.size, length)):
+            data[d,:length] = ts.iloc[t:t+length].values.reshape(length)
+            data[d,length+1] = int(ts.index[t].dayofweek+1)
+            data[d,length+2] = int(ts.index[t].day)
+            data[d,length+3] = int(ts.index[t].month)
+            data[d,length+4] = int(ts.index[t].year)
             
             if fest:
                 for f in fest:
                     if ts.index[t]==pd.to_datetime(f):
-                        data[d,101] = 7
+                        data[d,length+5] = 7
         
         data = data[~np.isnan(data).any(axis=1)]
         elapsed_time = time.time()-start_time
 
         self.ts_matrix = data
         self._time += elapsed_time
-
 # =============================================================================
 # CLUSTERING
 # =============================================================================
@@ -209,31 +219,32 @@ class waTS(object):
         '''
         start_time = time.time()
         mat = self.ts_matrix
+        length = self._length
         
         df = pd.DataFrame(mat)
-        df['day'] = np.where(np.logical_and(df[97]>=1, df[97]<=5), 0, 1)
+        df['day'] = np.where(np.logical_and(df[length+1]>=1, df[length+1]<=5), 0, 1)
 
         df['labels'] = np.where(df['day']==0,
                                       np.where(
-                                          np.logical_or(df[99]==12, df[99]<3), 0, np.where(
-                                              np.logical_and(df[99]>=3, df[99]<6), 2, np.where(
-                                                  np.logical_and(df[99]>=6, df[99]<9), 4, 6))), 
+                                          np.logical_or(df[length+3]==12, df[length+3]<3), 0, np.where(
+                                              np.logical_and(df[length+3]>=3, df[length+3]<6), 2, np.where(
+                                                  np.logical_and(df[length+3]>=6, df[length+3]<9), 4, 6))), 
                                       np.where(
-                                          np.logical_or(df[99]==12, df[99]<3), 1, np.where(
-                                              np.logical_and(df[99]>=3, df[99]<6), 3, np.where(
-                                                  np.logical_and(df[99]>=6, df[99]<9), 5, 7))))
+                                          np.logical_or(df[length+3]==12, df[length+3]<3), 1, np.where(
+                                              np.logical_and(df[length+3]>=3, df[length+3]<6), 3, np.where(
+                                                  np.logical_and(df[length+3]>=6, df[length+3]<9), 5, 7))))
     
-        median = np.zeros((len(np.unique(df.labels)), 96))
+        median = np.zeros((len(np.unique(df.labels)), length))
         for i in np.unique(df.labels):
             a = df[df['labels']==i]
-            for j in range(96):
+            for j in range(length):
                 median[i, j] = np.median(a.iloc[:, j])
         elapsed_time = time.time()-start_time
         self.median_matrix = median
         self.df_matrix = df
         self._time+=elapsed_time
     
-    def outlier_region(self):
+    def outlier_region(self, alpha):
         '''
         Parameters
         ----------
@@ -251,7 +262,8 @@ class waTS(object):
         med = self.median_matrix
         cl = self.df_matrix
         df = self.ts_recon
-
+        length = self._length
+        
         qn = []
     
         for i in range(med.shape[0]):
@@ -259,45 +271,21 @@ class waTS(object):
             b = np.reshape(a,a.size)
             qn.append(self.Qn(b))
     
-        upper_90 = []
-        lower_90 = []
-    
-        upper_95 = []
-        lower_95 = []
-    
-        upper_99 = []
-        lower_99 = []
+        upper = []
+        lower = []
     
         for row in cl.iterrows():
-            a = row[:96]
+            a = row[:length]
             cluster = int(row[1]['labels'])
             m = med[cluster, :]
-            upper_90.append([x + norm.ppf(1-0.1/2)*qn[cluster] for x in m])
-            lower_90.append([x - norm.ppf(1-0.1/2)*qn[cluster] for x in m])
+            upper.append([x + norm.ppf(1-alpha/2)*qn[cluster] for x in m])
+            lower.append([x - norm.ppf(1-alpha/2)*qn[cluster] for x in m])
     
-            upper_95.append([x + norm.ppf(1-0.05/2)*qn[cluster] for x in m])
-            lower_95.append([x - norm.ppf(1-0.05/2)*qn[cluster] for x in m])
+        upper = np.array(upper)
+        upper = upper.reshape(upper.size)
     
-            upper_99.append([x + norm.ppf(1-0.01/2)*qn[cluster] for x in m])
-            lower_99.append([x - norm.ppf(1-0.01/2)*qn[cluster] for x in m])
-    
-        upper_90 = np.array(upper_90)
-        upper_90 = upper_90.reshape(upper_90.size)
-    
-        lower_90 = np.array(lower_90)
-        lower_90 = lower_90.reshape(lower_90.size)
-        
-        upper_95 = np.array(upper_95)
-        upper_95 = upper_95.reshape(upper_95.size)
-    
-        lower_95 = np.array(lower_95)
-        lower_95 = lower_95.reshape(lower_95.size)
-        
-        upper_99 = np.array(upper_99)
-        upper_99 = upper_99.reshape(upper_99.size)
-    
-        lower_99 = np.array(lower_99)
-        lower_99 = lower_99.reshape(lower_99.size)
+        lower = np.array(lower)
+        lower = lower.reshape(lower.size)
     
         medianas = []
         for row in cl.iterrows():
@@ -308,26 +296,31 @@ class waTS(object):
         
         dataframe = pd.DataFrame()
         
+        a = (1-alpha)*100
+        
         dataframe["Flow"] = df.Flow
-        dataframe["Upper_90"] = upper_90
-        dataframe["Lower_90"] = lower_90
-    
-        dataframe["Upper_95"] = upper_95
-        dataframe["Lower_95"] = lower_95
-    
-        dataframe["Upper_99"] = upper_99
-        dataframe["Lower_99"] = lower_99
+        dataframe[f"Upper_{a}"] = upper
+        dataframe[f"Lower_{a}"] = lower
     
         dataframe["Median"] = medianas
 
         elapsed_time = time.time()-start_time
         self.df_outliers = dataframe
         self._time += elapsed_time
+        self._alpha = alpha
         
-    def corrected(self, alpha):
+    def corrected(self):
         
         df_outliers = self.df_outliers
         start_time = time.time()
+        alpha = self._alpha
+        
+        a = (1-alpha)*100
+        df_outliers.loc[(df_outliers['Flow']>df_outliers[f'Upper_{a}']), 'Flow'] = df_outliers.loc[(df_outliers['Flow']>df_outliers[f'Upper_{a}']), 'Median']
+        df_outliers.loc[(df_outliers['Flow']<df_outliers[f'Lower_{a}']), 'Flow'] = df_outliers.loc[(df_outliers['Flow']<df_outliers[f'Lower_{a}']), 'Median']
+        
+        df_correct=df_outliers.copy()
+        '''
         correct = np.zeros(df_outliers.shape[0])
         i = 0
         if alpha == 0.1:
@@ -352,6 +345,7 @@ class waTS(object):
                     correct[i] = row["Flow"]
                 i+=1
         df_correct = pd.DataFrame({"Flow": correct}, index=df_outliers.index)
+        '''
         elapsed_time = time.time()-start_time
         
         self.df_correct = df_correct
@@ -672,28 +666,28 @@ class waTS(object):
         '''
         ts = self.ts
         chunks = self._chunks
-        
+
         start_time = time.time()
         dataframe = ts.copy()
-        
+
         for c in chunks:
             if len(c)>steps:
                 for n in c:
                     values = []
                     for k in range(weeks):
-                        values.append(dataframe.loc[n-pd.Timedelta(value=(k+1)*7, unit='D')]) 
-    
+                        values.append(dataframe.loc[n-pd.Timedelta(value=(k+1)*7, unit='D')])
+
                     if long == 'median':
                         dataframe.loc[n] = np.median(values)
                     elif long == 'mean':
                         dataframe.loc[n] = np.mean(values)
-    
+
             else:
                 ts = dataframe.loc[:c[0]].iloc[:-1]            
                 if short == 'ARIMA':
                     arima_model = auto_arima(ts)
                     y_forecast = arima_model.predict(n_periods=len(c))
-                
+
                 elif short == 'HW':
                     estimator = ExponentialSmoothing(ts, trend='add', seasonal='add', seasonal_periods=seasonal1)
                     fitted_model = estimator.fit()
@@ -717,31 +711,47 @@ class waTS(object):
         
         self.ts_recon = dataframe
         self._time += elapsed_time
-    
-class Pipeline(waTS):
-    def wrangle(self):
-        self.data_wrangler(plot=1)
 
-    def recon(self, method, weeks, short='median', long='ARIMA', steps=96, seasonal1=96, seasonal2=672):
+    def resample(self, how):
+        ts_recon_resample = self.ts_recon.resample(how).median()
+        steps = ts_recon_resample.groupby(ts_recon_resample.index.floor('d')).size()
+        length = steps[0]
+        days = len(steps)
+        
+        self.ts_recon = ts_recon_resample
+        self._length = length
+        self._days = days
+        
+class Pipeline(waTS):
+
+    def wrangle(self, plot):
+        self.data_wrangler(plot=plot)
+
+    def recon(self, method, weeks, resample, how, short, long, steps, seasonal1, seasonal2):
         if method=='mean':
             self.recon_mean(weeks)
         elif method=='median':
             self.recon_median(weeks)
         else:
             self.recon_hybrid(steps, seasonal1, seasonal2, short, long, weeks)
-    
+            
+        if resample==True:
+            self.resample(how=how)
+
     def outliers(self, fest, alpha, correction=True):
         self.matrix(fest, self.ts_recon)
         self.clusters()
-        self.outlier_region()
+        self.outlier_region(alpha)
         if correction==True:
-            self.corrected(alpha)
+            self.corrected()
             self.ts_final = self.df_correct
         else:
             self.ts_final = self.ts_recon
-    def predict(self, model=KNeighborsRegressor(), stat=96, horizon=96, prt=1, 
+
+    def predict(self, model, stat, horizon, prt=0, 
                  nodes=20, epochs=50, lay=3, init='normal', act='relu', opt='adam', nn=False):
-        if nn==False:
-            self.forecast(self.ts_final, model, stat, horizon, prt)
-        else:
+        if model=='NN':
             self.forecast_NN(self.ts_final, nodes, epochs, stat, horizon, lay, init, act, opt, prt)
+        else:
+            self.forecast(self.ts_final, model, stat, horizon, prt)
+            
