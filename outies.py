@@ -14,6 +14,7 @@ from sklearn.cluster import KMeans
 import math
 import matplotlib.pyplot as plt
 
+
 def clusters(mat, n_clusters):
     '''
     Parameters

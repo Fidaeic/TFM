@@ -13,14 +13,16 @@ import wrangler
 import matplotlib.pyplot as plt
 from ypstruct import structure
 import wrangler
+from metrics import smape, rmse
+from waTS import waTS, Pipeline
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.svm import SVR
 
-
 from sklearn.model_selection import LeaveOneOut, KFold, train_test_split
-from sklearn.datasets import fetch_california_housing
 
 from sklearn.metrics import r2_score
 import time
@@ -54,7 +56,79 @@ def apply_bound(x, varmin, varmax):
     x.position = np.minimum(x.position, varmax)
 
 def prec(y_hat, y_real):
-    return r2_score(y_hat, y_real)
+    return rmse(y_hat, y_real)
+
+def knn_weights(num):
+    if num==1:
+        return 'uniform'
+    else:
+        return 'distance'
+
+def knn_algorithm(num):
+    if num==1:
+        return 'auto'
+    elif num==2:
+        return 'ball_tree'
+    elif num==3:
+        return 'kd_tree'
+    else:
+        return 'brute'
+
+def svr_kernel(num):
+    if num==1:
+        return 'linear'
+    elif num==2:
+        return 'poly'
+    elif num==3:
+        return 'rbf'
+    elif num==4:
+        return 'sigmoid'
+    else:
+        return 'precomputed'
+    
+def svr_gamma(num):
+    if num==1:
+        return 'scale'
+    else:
+        return 'auto'
+
+def svr_shrinking(num):
+    if num==0:
+        return True
+    else:
+        return False
+    
+def dt_criterion(num):
+    if num==1:
+        return 'mse'
+    elif num==2:
+        return 'friedman_mse'
+    else:
+        return 'mae'
+
+def dt_splitter(num):
+    if num==1:
+        return 'best'
+    else:
+        return 'random'
+    
+def gbr_loss(num):
+    if num==1:
+        return 'ls'
+    elif num==2:
+        return 'lad'
+    elif num==3:
+        return 'huber'
+    else:
+        return 'quantile'
+
+def gbr_criterion(num):
+    if num==1:
+        return 'mse'
+    elif num==2:
+        return 'friedman_mse'
+    else:
+        return 'mae'
 
 def run(problem, params, df_recon, estac, horizon, model):
 
@@ -81,7 +155,7 @@ def run(problem, params, df_recon, estac, horizon, model):
 
     # Best Solution Ever Found
     bestsol = empty_individual.deepcopy()
-    bestsol.cost = 0
+    bestsol.cost = 1000 
 
     X_train, X_test, y_train, y_test, X, y, y_for_test= wrangler.shifting(df_recon, estac, horizon)
 
@@ -102,7 +176,7 @@ def run(problem, params, df_recon, estac, horizon, model):
             
             pop[i].cost = costfunc(y_hat, y_test)
             
-            if pop[i].cost > bestsol.cost:
+            if pop[i].cost<bestsol.cost:
                 bestsol = pop[i].deepcopy()
     
         # Best Cost of Iterations
@@ -150,7 +224,7 @@ def run(problem, params, df_recon, estac, horizon, model):
                 y_hat_1 = rf_1.predict(X_test)
                 
                 c1.cost = costfunc(y_hat_1, y_test)
-                if c1.cost > bestsol.cost:
+                if c1.cost < bestsol.cost:
                     bestsol = c1.deepcopy()
     
                 # Evaluate Second Offspring
@@ -163,14 +237,388 @@ def run(problem, params, df_recon, estac, horizon, model):
                 y_hat_2 = rf_2.predict(X_test)
     
                 c2.cost = costfunc(y_hat_2, y_test)
-                if c2.cost > bestsol.cost:
+                if c2.cost < bestsol.cost:
                     bestsol = c2.deepcopy()
     
                 # Add Offsprings to popc
                 popc.append(c1)
                 popc.append(c2)
         
+    elif model=='KNN':
+        for i in range(npop):
+            pop[i].position = np.random.randint(varmin, varmax, nvar)
+            
+            pop[i].position[4] = np.random.uniform(1, 2, 1)[0]
 
+            knn = KNeighborsRegressor(n_neighbors=pop[i].position[0],
+                                      weights=knn_weights(pop[i].position[1]),
+                                      algorithm=knn_algorithm(pop[i].position[2]),
+                                      leaf_size=pop[i].position[3],
+                                      p=pop[i].position[4],
+                                      n_jobs=-1)
+
+            knn.fit(X_train, y_train)
+            y_hat = knn.predict(X_test)
+            
+            pop[i].cost = costfunc(y_hat, y_test)
+            
+            if pop[i].cost<bestsol.cost:
+                bestsol = pop[i].deepcopy()
+    
+        # Best Cost of Iterations
+        bestcost = np.empty(maxit)
+        
+        # Main Loop
+        for it in range(maxit):
+    
+            costs = np.array([x.cost for x in pop])
+            avg_cost = np.mean(costs)
+            if avg_cost != 0:
+                costs = costs/avg_cost
+            probs = np.exp(-beta*costs)
+    
+            popc = []
+            for _ in range(nc//2):
+    
+                # Select Parents
+                #q = np.random.permutation(npop)
+                #p1 = pop[q[0]]
+                #p2 = pop[q[1]]
+    
+                # Perform Roulette Wheel Selection
+                p1 = pop[roulette_wheel_selection(probs)]
+                p2 = pop[roulette_wheel_selection(probs)]
+                
+                # Perform Crossover
+                c1, c2 = crossover(p1, p2, gamma)
+    
+                # Perform Mutation
+                c1 = mutate(c1, mu, sigma)
+                c2 = mutate(c2, mu, sigma)
+    
+                # Apply Bounds
+                apply_bound(c1, varmin, varmax)
+                apply_bound(c2, varmin, varmax)
+    
+                # Evaluate First Offspring
+                knn_1 = KNeighborsRegressor(n_neighbors=int(c1.position[0]),
+                                      weights=knn_weights(int(c1.position[1])),
+                                      algorithm=knn_algorithm(int(c1.position[2])),
+                                      leaf_size=int(c1.position[3]),
+                                      p=c1.position[4],
+                                      n_jobs=-1)
+
+            
+                knn_1.fit(X_train, y_train)
+                y_hat_1 = knn_1.predict(X_test)
+                
+                c1.cost = costfunc(y_hat_1, y_test)
+                if c1.cost < bestsol.cost:
+                    bestsol = c1.deepcopy()
+    
+                # Evaluate Second Offspring
+                knn_2 = KNeighborsRegressor(n_neighbors=int(c2.position[0]),
+                                      weights=knn_weights(int(c2.position[1])),
+                                      algorithm=knn_algorithm(int(c2.position[2])),
+                                      leaf_size=int(c2.position[3]),
+                                      p=c2.position[4],
+                                      n_jobs=-1)
+            
+                knn_2.fit(X_train, y_train)
+                y_hat_2 = knn_2.predict(X_test)
+    
+                c2.cost = costfunc(y_hat_2, y_test)
+                if c2.cost < bestsol.cost:
+                    bestsol = c2.deepcopy()
+    
+                # Add Offsprings to popc
+                popc.append(c1)
+                popc.append(c2)
+
+    elif model=='SVR':
+        for i in range(npop):
+            #kernel, degree, gamma, coef0, shrinking
+            pop[i].position = np.random.randint(varmin, varmax, nvar)
+            
+            pop[i].position[4] = np.random.uniform(1, 2, 1)[0]
+
+            svr = SVR(kernel=svr_kernel(pop[i].position[0]),
+                        degree=pop[i].position[1],
+                        gamma=svr_gamma(pop[i].position[2]),
+                        coef0=pop[i].position[3],
+                        shrinking=svr_shrinking(pop[i].position[4])
+                        )
+
+            svr.fit(X_train, y_train)
+            y_hat = svr.predict(X_test)
+            
+            pop[i].cost = costfunc(y_hat, y_test)
+            
+            if pop[i].cost<bestsol.cost:
+                bestsol = pop[i].deepcopy()
+    
+        # Best Cost of Iterations
+        bestcost = np.empty(maxit)
+        
+        # Main Loop
+        for it in range(maxit):
+    
+            costs = np.array([x.cost for x in pop])
+            avg_cost = np.mean(costs)
+            if avg_cost != 0:
+                costs = costs/avg_cost
+            probs = np.exp(-beta*costs)
+    
+            popc = []
+            for _ in range(nc//2):
+    
+                # Select Parents
+                #q = np.random.permutation(npop)
+                #p1 = pop[q[0]]
+                #p2 = pop[q[1]]
+    
+                # Perform Roulette Wheel Selection
+                p1 = pop[roulette_wheel_selection(probs)]
+                p2 = pop[roulette_wheel_selection(probs)]
+                
+                # Perform Crossover
+                c1, c2 = crossover(p1, p2, gamma)
+    
+                # Perform Mutation
+                c1 = mutate(c1, mu, sigma)
+                c2 = mutate(c2, mu, sigma)
+    
+                # Apply Bounds
+                apply_bound(c1, varmin, varmax)
+                apply_bound(c2, varmin, varmax)
+    
+                # Evaluate First Offspring
+                #kernel, degree, gamma, coef0, shrinking
+                svr_1 = SVR(kernel=svr_kernel(int(c1.position[0])),
+                                      degree=int(c1.position[1]),
+                                      gamma=svr_gamma(int(c1.position[2])),
+                                      coef0=c1.position[3],
+                                      shrinking=svr_shrinking(c1.position[4])
+                                      )
+
+            
+                svr_1.fit(X_train, y_train)
+                y_hat_1 = svr_1.predict(X_test)
+                
+                c1.cost = costfunc(y_hat_1, y_test)
+                if c1.cost < bestsol.cost:
+                    bestsol = c1.deepcopy()
+    
+                # Evaluate Second Offspring
+                svr_2 = SVR(kernel=svr_kernel(int(c2.position[0])),
+                                      degree=int(c2.position[1]),
+                                      gamma=svr_gamma(int(c2.position[2])),
+                                      coef0=c2.position[3],
+                                      shrinking=svr_shrinking(c2.position[4])
+                                      )
+            
+                svr_2.fit(X_train, y_train)
+                y_hat_2 = svr_2.predict(X_test)
+    
+                c2.cost = costfunc(y_hat_2, y_test)
+                if c2.cost < bestsol.cost:
+                    bestsol = c2.deepcopy()
+    
+                # Add Offsprings to popc
+                popc.append(c1)
+                popc.append(c2)
+
+    elif model=='DT':
+        for i in range(npop):
+            #criterion, splitter, max_depth, min_samples_split, min_samples_leaf
+            pop[i].position = np.random.randint(varmin, varmax, nvar).astype(np.float)
+            
+            pop[i].position[4] = np.random.uniform(0.0001, 0.5, 1)[0]
+
+            dt = DecisionTreeRegressor(criterion=dt_criterion(int(pop[i].position[0])),
+                        splitter=dt_splitter(int(pop[i].position[1])),
+                        max_depth=int(pop[i].position[2]),
+                        min_samples_split=int(pop[i].position[3]),
+                        min_samples_leaf=pop[i].position[4]
+                        )
+
+            dt.fit(X_train, y_train)
+            y_hat = dt.predict(X_test)
+            
+            pop[i].cost = costfunc(y_hat, y_test)
+            
+            if pop[i].cost<bestsol.cost:
+                bestsol = pop[i].deepcopy()
+    
+        # Best Cost of Iterations
+        bestcost = np.empty(maxit)
+        
+        # Main Loop
+        for it in range(maxit):
+    
+            costs = np.array([x.cost for x in pop])
+            avg_cost = np.mean(costs)
+            if avg_cost != 0:
+                costs = costs/avg_cost
+            probs = np.exp(-beta*costs)
+    
+            popc = []
+            for _ in range(nc//2):
+    
+                # Select Parents
+                #q = np.random.permutation(npop)
+                #p1 = pop[q[0]]
+                #p2 = pop[q[1]]
+    
+                # Perform Roulette Wheel Selection
+                p1 = pop[roulette_wheel_selection(probs)]
+                p2 = pop[roulette_wheel_selection(probs)]
+                
+                # Perform Crossover
+                c1, c2 = crossover(p1, p2, gamma)
+    
+                # Perform Mutation
+                c1 = mutate(c1, mu, sigma)
+                c2 = mutate(c2, mu, sigma)
+    
+                # Apply Bounds
+                apply_bound(c1, varmin, varmax)
+                apply_bound(c2, varmin, varmax)
+    
+                # Evaluate First Offspring
+                #criterion, splitter, max_depth, min_samples_split, min_samples_leaf
+                dt_1 = DecisionTreeRegressor(criterion=dt_criterion(int(c1.position[0])),
+                                      splitter=dt_splitter(int(c1.position[1])),
+                                      max_depth=int(c1.position[2]),
+                                      min_samples_split=int(c1.position[3]),
+                                      min_samples_leaf=c1.position[4]
+                                      )
+
+            
+                dt_1.fit(X_train, y_train)
+                y_hat_1 = dt_1.predict(X_test)
+                
+                c1.cost = costfunc(y_hat_1, y_test)
+                if c1.cost < bestsol.cost:
+                    bestsol = c1.deepcopy()
+    
+                # Evaluate Second Offspring
+                dt_2 = DecisionTreeRegressor(criterion=dt_criterion(int(c2.position[0])),
+                                      splitter=dt_splitter(int(c2.position[1])),
+                                      max_depth=int(c2.position[2]),
+                                      min_samples_split=int(c2.position[3]),
+                                      min_samples_leaf=c2.position[4]
+                                      )
+            
+                dt_2.fit(X_train, y_train)
+                y_hat_2 = dt_2.predict(X_test)
+    
+                c2.cost = costfunc(y_hat_2, y_test)
+                if c2.cost < bestsol.cost:
+                    bestsol = c2.deepcopy()
+    
+                # Add Offsprings to popc
+                popc.append(c1)
+                popc.append(c2)
+
+    elif model=='GBR':
+        for i in range(npop):
+            #loss, learning_rate, n_estimators, criterion, min_samples_split, min_samples_leaf, max_depth
+            pop[i].position = np.random.randint(varmin, varmax, nvar).astype(np.float)
+            
+            pop[i].position[1] = np.random.uniform(0.1, 1, 1)[0]
+
+            gbr = GradientBoostingRegressor(loss=gbr_loss(int(pop[i].position[0])),
+                        learning_rate=pop[i].position[1],
+                        n_estimators=int(pop[i].position[2]),
+                        criterion=gbr_criterion(int(pop[i].position[3])),
+                        min_samples_split=int(pop[i].position[4]),
+                        min_samples_leaf=int(pop[i].position[5]),
+                        max_depth=int(pop[i].position[6])
+                        )
+
+            gbr.fit(X_train, y_train)
+            y_hat = gbr.predict(X_test)
+            
+            pop[i].cost = costfunc(y_hat, y_test)
+            
+            if pop[i].cost<bestsol.cost:
+                bestsol = pop[i].deepcopy()
+    
+        # Best Cost of Iterations
+        bestcost = np.empty(maxit)
+        
+        # Main Loop
+        for it in range(maxit):
+    
+            costs = np.array([x.cost for x in pop])
+            avg_cost = np.mean(costs)
+            if avg_cost != 0:
+                costs = costs/avg_cost
+            probs = np.exp(-beta*costs)
+    
+            popc = []
+            for _ in range(nc//2):
+    
+                # Select Parents
+                #q = np.random.permutation(npop)
+                #p1 = pop[q[0]]
+                #p2 = pop[q[1]]
+    
+                # Perform Roulette Wheel Selection
+                p1 = pop[roulette_wheel_selection(probs)]
+                p2 = pop[roulette_wheel_selection(probs)]
+                
+                # Perform Crossover
+                c1, c2 = crossover(p1, p2, gamma)
+    
+                # Perform Mutation
+                c1 = mutate(c1, mu, sigma)
+                c2 = mutate(c2, mu, sigma)
+    
+                # Apply Bounds
+                apply_bound(c1, varmin, varmax)
+                apply_bound(c2, varmin, varmax)
+    
+                # Evaluate First Offspring
+                #loss, learning_rate, n_estimators, criterion, min_samples_split, min_samples_leaf, max_depth
+                gbr_1 = GradientBoostingRegressor(loss=gbr_loss(int(c1.position[0])),
+                        learning_rate=c1.position[1],
+                        n_estimators=int(c1.position[2]),
+                        criterion=gbr_criterion(int(c1.position[3])),
+                        min_samples_split=c1.position[4],
+                        min_samples_leaf=c1.position[5],
+                        max_depth=int(c1.position[6])
+                        )
+
+            
+                gbr_1.fit(X_train, y_train)
+                y_hat_1 = gbr_1.predict(X_test)
+                
+                c1.cost = costfunc(y_hat_1, y_test)
+                if c1.cost < bestsol.cost:
+                    bestsol = c1.deepcopy()
+    
+                # Evaluate Second Offspring
+                gbr_2 = GradientBoostingRegressor(loss=gbr_loss(int(c2.position[0])),
+                        learning_rate=c2.position[1],
+                        n_estimators=int(c2.position[2]),
+                        criterion=gbr_criterion(int(c2.position[3])),
+                        min_samples_split=c2.position[4],
+                        min_samples_leaf=c2.position[5],
+                        max_depth=int(c2.position[6])
+                        )
+            
+                gbr_2.fit(X_train, y_train)
+                y_hat_2 = gbr_2.predict(X_test)
+    
+                c2.cost = costfunc(y_hat_2, y_test)
+                if c2.cost < bestsol.cost:
+                    bestsol = c2.deepcopy()
+    
+                # Add Offsprings to popc
+                popc.append(c1)
+                popc.append(c2)
         # Merge, Sort and Select
         pop += popc
         pop = sorted(pop, key=lambda x: x.cost, reverse=True)
@@ -190,3 +638,63 @@ def run(problem, params, df_recon, estac, horizon, model):
     return out
 
 
+weeks = 4
+resample=False
+hor = 96
+steps = 96
+stat = 96
+
+df_flow = pd.read_csv("Data/flow.txt", parse_dates=[3], sep=';', header = None, skiprows=0).drop([0, 1, 2], axis=1)
+pipe = Pipeline(df_flow)
+pipe.wrangle(plot=0)
+pipe.recon('median', weeks, resample=resample, how='H', short=None, long=None, steps=hor, seasonal1=stat, seasonal2=stat*7)
+dataf = pipe.ts_recon.copy()
+
+model = 'GBR'
+
+# Problem Definition
+problem = structure()
+problem.costfunc = prec
+
+if model=='RF':
+    problem.nvar = 4
+    #n_estimators, max_depth, min samples split, min samples leaf
+    problem.varmin = [1, 1, 2, 1]
+    problem.varmax = [500,  500, 50, 50]
+
+elif model=='KNN':
+    problem.nvar = 5
+    #n_neighbors, weights, algorithm, leaf_size, p
+    problem.varmin = [1, 1, 1, 1, 1]
+    problem.varmax = [50, 2, 4, 100, 2]
+
+elif model=='SVR':
+    problem.nvar = 5
+    #kernel, degree, gamma, coef0, shrinking
+    problem.varmin = [1, 1, 1, 0, 0]
+    problem.varmax = [5,  10, 2, 10, 1]
+
+elif model=='DT':
+    problem.nvar = 5
+    #criterion, splitter, max_depth, min_samples_split, min_samples_leaf
+    problem.varmin = [1, 1, 1, 2, 0.1]
+    problem.varmax = [3, 2, 500, 50, 0.5]
+
+elif model=='GBR':
+    problem.nvar = 7
+    #loss, learning_rate, n_estimators, criterion, min_samples_split, min_samples_leaf, max_depth
+    problem.varmin = [1, 0.01, 1, 1, 2, 1, 1]
+    problem.varmax = [4, 1, 500, 3, 50, 50, 500]
+    
+# GA Parameters
+params = structure()
+params.maxit = 1
+params.npop = 1
+params.beta = 1
+params.pc = 1
+params.gamma = 0.1
+params.mu = 0.01
+params.sigma = 0.1
+
+# Run GA
+gbr_out = run(problem, params, dataf, 96, 96, model=model)

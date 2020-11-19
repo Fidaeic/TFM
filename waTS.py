@@ -16,7 +16,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.metrics import r2_score
 from sklearn.svm import SVR
-from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.tree import DecisionTreeRegressor
 
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from tbats import TBATS
@@ -26,6 +27,8 @@ import keras
 from keras.models import Sequential
 from keras.layers import Dense
 from keras.wrappers.scikit_learn import KerasRegressor
+
+import robustbase
 
 class waTS(object):
     
@@ -51,7 +54,6 @@ class waTS(object):
         self._X = None
         self._y = None
         self._y_for_test = None
-        self._accuracy = None
         self._alpha = None
         self._length = None
         self._days  = None
@@ -264,12 +266,14 @@ class waTS(object):
         df = self.ts_recon
         length = self._length
         
-        qn = []
+        # qn = []
+        mad = list()
     
         for i in range(med.shape[0]):
             a = np.array(cl[cl['labels']==i].drop(cl.columns[-8:], axis=1))
             b = np.reshape(a,a.size)
-            qn.append(self.Qn(b))
+            # qn.append(self.Qn(b))
+            mad.append(robustbase.mad(b))
     
         upper = []
         lower = []
@@ -278,26 +282,28 @@ class waTS(object):
             a = row[:length]
             cluster = int(row[1]['labels'])
             m = med[cluster, :]
-            upper.append([x + norm.ppf(1-alpha/2)*qn[cluster] for x in m])
-            lower.append([x - norm.ppf(1-alpha/2)*qn[cluster] for x in m])
-    
+            # upper.append([x + norm.ppf(1-alpha/2)*qn[cluster] for x in m])
+            # lower.append([x - norm.ppf(1-alpha/2)*qn[cluster] for x in m])
+            upper.append([x + norm.ppf(1-alpha/2)*mad[cluster] for x in m])
+            lower.append([x - norm.ppf(1-alpha/2)*mad[cluster] for x in m])
+
         upper = np.array(upper)
         upper = upper.reshape(upper.size)
-    
+
         lower = np.array(lower)
         lower = lower.reshape(lower.size)
-    
+
         medianas = []
         for row in cl.iterrows():
             medianas.append(med[int(row[1]['labels'])])
-            
+
         medianas = np.array(medianas)
         medianas = medianas.reshape(medianas.size)
-        
+
         dataframe = pd.DataFrame()
-        
+
         a = (1-alpha)*100
-        
+
         dataframe["Flow"] = df.Flow
         dataframe[f"Upper_{a}"] = upper
         dataframe[f"Lower_{a}"] = lower
@@ -443,15 +449,6 @@ class waTS(object):
     
         y_forecast = df_for[stat].values
         
-        acc = {"Training R2": r2_score(y_train, y_pred_train)*100,
-                "Test R2": r2_score(y_test, y_pred_test)*100,
-                "Forecast R2": r2_score(y_for_test, y_forecast)*100}
-
-        # Training confidence intervals
-        # res_train = y_pred_train-y_train
-        # mu_train = np.mean(res_train)
-        # sigma_train = np.std(res_train)
-        
         elapsed_time = time.time()-start_time
 
         if prt==1:
@@ -466,10 +463,9 @@ class waTS(object):
         self._y_pred_train = y_pred_train
         self._y_pred_test = y_pred_test
         self._y_forecast = y_forecast
-        self._accuracy = acc
         self._time += elapsed_time
         
-    def forecast_NN(self, ts, nodes, epochs, stat, horizon, lay, init, act, opt, prt):
+    def forecast_ANN(self, ts, nodes, epochs, stat, horizon, lay, init, act, opt, prt):
         '''
         Parameters
         ----------
@@ -546,11 +542,7 @@ class waTS(object):
             df_for.iloc[i, stat] = model.predict(np.array(df_for.iloc[i, :-1]).reshape(1, stat))[0]
     
         y_forecast = df_for[stat].values
-        
-        acc = {"Training R2": r2_score(y_train, y_pred_train)*100,
-                "Test R2": r2_score(y_test, y_pred_test)*100,
-                "Forecast R2": r2_score(y_for_test, y_forecast)*100}
-        
+
         elapsed_time = time.time()-start_time
         
         if prt==1:
@@ -565,8 +557,8 @@ class waTS(object):
         self._y_pred_train = y_pred_train
         self._y_pred_test = y_pred_test
         self._y_forecast = y_forecast
-        self._accuracy = acc
         self._time += elapsed_time
+
 
 # =============================================================================
 # RECONSTRUCTION METHODS FOR TIME SERIES.
@@ -749,9 +741,9 @@ class Pipeline(waTS):
             self.ts_final = self.ts_recon
 
     def predict(self, model, stat, horizon, prt=0, 
-                 nodes=20, epochs=50, lay=3, init='normal', act='relu', opt='adam', nn=False):
-        if model=='NN':
-            self.forecast_NN(self.ts_final, nodes, epochs, stat, horizon, lay, init, act, opt, prt)
+                 nodes=100, epochs=100, lay=5, init='normal', act='relu', opt='adam', nn=False):
+        if model=='ANN':
+            self.forecast_ANN(self.ts_final, nodes, epochs, stat, horizon, lay, init, act, opt, prt)
+
         else:
             self.forecast(self.ts_final, model, stat, horizon, prt)
-            
