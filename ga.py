@@ -7,27 +7,16 @@ Created on Tue Aug 11 19:27:08 2020
 Genetic Algorithm for hyperparameter optimization
 """
 
-import pandas as pd
 import numpy as np
 import wrangler
-import matplotlib.pyplot as plt
 from ypstruct import structure
-import wrangler
-from metrics import smape, rmse
-from waTS import waTS, Pipeline
+from metrics import rmse
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.svm import SVR
-
-from sklearn.model_selection import LeaveOneOut, KFold, train_test_split
-
-from sklearn.metrics import r2_score
-import time
-#import xgboost as xgb
-from scipy.stats import norm
 
 #Run GA
 def roulette_wheel_selection(p):
@@ -636,65 +625,3 @@ def run(problem, params, df_recon, estac, horizon, model):
     out.bestsol = bestsol
     out.bestcost = bestcost
     return out
-
-
-weeks = 4
-resample=False
-hor = 96
-steps = 96
-stat = 96
-
-df_flow = pd.read_csv("Data/flow.txt", parse_dates=[3], sep=';', header = None, skiprows=0).drop([0, 1, 2], axis=1)
-pipe = Pipeline(df_flow)
-pipe.wrangle(plot=0)
-pipe.recon('median', weeks, resample=resample, how='H', short=None, long=None, steps=hor, seasonal1=stat, seasonal2=stat*7)
-dataf = pipe.ts_recon.copy()
-
-model = 'GBR'
-
-# Problem Definition
-problem = structure()
-problem.costfunc = prec
-
-if model=='RF':
-    problem.nvar = 4
-    #n_estimators, max_depth, min samples split, min samples leaf
-    problem.varmin = [1, 1, 2, 1]
-    problem.varmax = [500,  500, 50, 50]
-
-elif model=='KNN':
-    problem.nvar = 5
-    #n_neighbors, weights, algorithm, leaf_size, p
-    problem.varmin = [1, 1, 1, 1, 1]
-    problem.varmax = [50, 2, 4, 100, 2]
-
-elif model=='SVR':
-    problem.nvar = 5
-    #kernel, degree, gamma, coef0, shrinking
-    problem.varmin = [1, 1, 1, 0, 0]
-    problem.varmax = [5,  10, 2, 10, 1]
-
-elif model=='DT':
-    problem.nvar = 5
-    #criterion, splitter, max_depth, min_samples_split, min_samples_leaf
-    problem.varmin = [1, 1, 1, 2, 0.1]
-    problem.varmax = [3, 2, 500, 50, 0.5]
-
-elif model=='GBR':
-    problem.nvar = 7
-    #loss, learning_rate, n_estimators, criterion, min_samples_split, min_samples_leaf, max_depth
-    problem.varmin = [1, 0.01, 1, 1, 2, 1, 1]
-    problem.varmax = [4, 1, 500, 3, 50, 50, 500]
-    
-# GA Parameters
-params = structure()
-params.maxit = 1
-params.npop = 1
-params.beta = 1
-params.pc = 1
-params.gamma = 0.1
-params.mu = 0.01
-params.sigma = 0.1
-
-# Run GA
-gbr_out = run(problem, params, dataf, 96, 96, model=model)

@@ -8,27 +8,19 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-import pred
 from scipy.stats import norm
+
+from pmdarima import auto_arima
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.metrics import r2_score
 from sklearn.svm import SVR
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.tree import DecisionTreeRegressor
 
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from tbats import TBATS
-from pmdarima.arima import auto_arima, ADFTest
 
-import keras
 from keras.models import Sequential
 from keras.layers import Dense
-from keras.wrappers.scikit_learn import KerasRegressor
-
-import robustbase
 
 class waTS(object):
     
@@ -266,14 +258,13 @@ class waTS(object):
         df = self.ts_recon
         length = self._length
         
-        # qn = []
-        mad = list()
+        qn = []
     
         for i in range(med.shape[0]):
             a = np.array(cl[cl['labels']==i].drop(cl.columns[-8:], axis=1))
             b = np.reshape(a,a.size)
-            # qn.append(self.Qn(b))
-            mad.append(robustbase.mad(b))
+            qn.append(self.Qn(b))
+
     
         upper = []
         lower = []
@@ -282,10 +273,9 @@ class waTS(object):
             a = row[:length]
             cluster = int(row[1]['labels'])
             m = med[cluster, :]
-            # upper.append([x + norm.ppf(1-alpha/2)*qn[cluster] for x in m])
-            # lower.append([x - norm.ppf(1-alpha/2)*qn[cluster] for x in m])
-            upper.append([x + norm.ppf(1-alpha/2)*mad[cluster] for x in m])
-            lower.append([x - norm.ppf(1-alpha/2)*mad[cluster] for x in m])
+
+            upper.append([x + norm.ppf(1-alpha/2)*qn[cluster] for x in m])
+            lower.append([x - norm.ppf(1-alpha/2)*qn[cluster] for x in m])
 
         upper = np.array(upper)
         upper = upper.reshape(upper.size)
@@ -302,7 +292,7 @@ class waTS(object):
 
         dataframe = pd.DataFrame()
 
-        a = (1-alpha)*100
+        a = int((1-alpha)*100)
 
         dataframe["Flow"] = df.Flow
         dataframe[f"Upper_{a}"] = upper
@@ -321,37 +311,12 @@ class waTS(object):
         start_time = time.time()
         alpha = self._alpha
         
-        a = (1-alpha)*100
+        a = int((1-alpha)*100)
         df_outliers.loc[(df_outliers['Flow']>df_outliers[f'Upper_{a}']), 'Flow'] = df_outliers.loc[(df_outliers['Flow']>df_outliers[f'Upper_{a}']), 'Median']
         df_outliers.loc[(df_outliers['Flow']<df_outliers[f'Lower_{a}']), 'Flow'] = df_outliers.loc[(df_outliers['Flow']<df_outliers[f'Lower_{a}']), 'Median']
         
         df_correct=df_outliers.copy()
-        '''
-        correct = np.zeros(df_outliers.shape[0])
-        i = 0
-        if alpha == 0.1:
-            for index, row in df_outliers.iterrows():
-                if row["Flow"]>row["Upper_90"] or row["Flow"]<row["Lower_90"]:
-                    correct[i] = row["Median"]
-                else:
-                    correct[i] = row["Flow"]
-                i+=1
-        elif alpha == 0.05:
-            for index, row in df_outliers.iterrows():
-                if row["Flow"]>row["Upper_95"] or row["Flow"]<row["Lower_95"]:
-                    correct[i] = row["Median"]
-                else:
-                    correct[i] = row["Flow"]
-                i+=1
-        elif alpha == 0.01:
-            for index, row in df_outliers.iterrows():
-                if row["Flow"]>row["Upper_99"] or row["Flow"]<row["Lower_99"]:
-                    correct[i] = row["Median"]
-                else:
-                    correct[i] = row["Flow"]
-                i+=1
-        df_correct = pd.DataFrame({"Flow": correct}, index=df_outliers.index)
-        '''
+
         elapsed_time = time.time()-start_time
         
         self.df_correct = df_correct
@@ -362,21 +327,22 @@ class waTS(object):
         df = self.df_outliers
     
         fecha = str(ano)+"-"+str(mes)+"-"+str(dia)
-        plt.figure(figsize=(16,10))
-        plt.grid(alpha=0.5)
-        plt.plot(df.loc[fecha, "Median"], color='black', linestyle='dashed')
-        plt.plot(df.loc[fecha, "Flow"])
+        fig, ax= plt.subplots(figsize=(20,10))
+        ax.grid(alpha=0.5)
+        line1, = ax.plot(df.loc[fecha, "Median"], label='Mediana del clúster', color='black', linestyle='dashed')
+        line2, = ax.plot(df.loc[fecha, "Flow"], label='Caudal medido')
         
-        plt.title(f"Consumption and outlier region on day {ano}-{mes}-{dia}", fontsize=20)
-        plt.ylabel("Water consumption (m3/h)", fontsize=16)
-        plt.xticks(rotation=45)
+        #plt.title(f"Consumption and outlier region on day {ano}-{mes}-{dia}", fontsize=20)
+        ax.set_ylabel("Caudal medido (m3/h)", fontsize=18)
+        ax.set_xlabel('Instante de tiempo en horas', fontsize=18)
+        
     
         if alpha == 0.1:
             plt.plot(df.loc[fecha, "Upper_90"], color='red', linestyle='dashed')
             plt.plot(df.loc[fecha, "Lower_90"], color='red', linestyle='dashed')
         elif alpha == 0.05:
-            plt.plot(df.loc[fecha, "Upper_95"], color='red', linestyle='dashed')
-            plt.plot(df.loc[fecha, "Lower_95"], color='red', linestyle='dashed')
+            line3, = ax.plot(df.loc[fecha, "Upper_95"], label="Región de anómalos (95%)", color='red', linestyle='dashed')
+            line4, = ax.plot(df.loc[fecha, "Lower_95"], color='red', linestyle='dashed')
         elif alpha == 0.01:
             plt.plot(df.loc[fecha, "Upper_99"], color='red', linestyle='dashed')
             plt.plot(df.loc[fecha, "Lower_99"], color='red', linestyle='dashed')
@@ -389,6 +355,9 @@ class waTS(object):
             plt.plot(df.loc[fecha, "Lower_99"], color='red', linestyle='dashed')
             
             plt.legend(["Median of the cluster", "Water consumption", "Outlier region"], fontsize=16)
+            
+        ax.legend(fontsize=18, loc='upper right')
+        plt.show()
 # =============================================================================
 # FORECASTING METHODS
 # =============================================================================
