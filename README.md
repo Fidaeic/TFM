@@ -9,5 +9,4 @@ Repositorio para el almacenamiento del código y los resultados relativos al Tra
   * metrics.py: Fichero en el que se recogen algunas métricas de validación utilizadas a lo largo del trabajo.
   * results.py: Script en el que se analizan los resultados mediante gráficos y pruebas de hipótesis.
 * **Data**: Carpeta en la que se almacenan los datos de la serie temporal original, previamente a su manipulación
-* **Predictions**: Carpetas en las que se almacenan los resultados de las predicciones realizadas para las 144 combinaciones calculadas
 * **Results**: Carpeta en la que se almacenan los datos reales que se intentan predecir, los resultados de todas las combinaciones y los tiempos de ejecución. También se incluye un fichero en el que se encuentran los resultados del mejor modelo obtenido, junto con un intervalo de confianza del 95%.
